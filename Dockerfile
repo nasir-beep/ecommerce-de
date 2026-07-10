@@ -1,13 +1,12 @@
-FROM python:3.12-slim
+FROM apache/airflow:2.8.0-python3.11
 
-WORKDIR /app
+WORKDIR /opt/airflow
 
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY airflow/dags /opt/airflow/dags
+COPY scripts /opt/airflow/scripts
 
-EXPOSE 8501
-
-CMD ["streamlit","run","dashboard/app.py","--server.address=0.0.0.0"]
+ENV AIRFLOW_HOME=/opt/airflow

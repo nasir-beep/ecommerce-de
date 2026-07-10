@@ -68,25 +68,24 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
 
+  streamlit:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+
+    container_name: ecommerce_dashboard
+
+    depends_on:
+      - postgres
+
+    ports:
+      - "8501:8501"
+
+    env_file:
+      - .env
+
+    networks:
+      - default
+
 volumes:
   postgres_data:
-
-streamlit:
-  build:
-    context: .
-    dockerfile: dashboard/Dockerfile
-
-  container_name: ecommerce_dashboard
-
-  depends_on:
-    - postgres
-
-  ports:
-    - "8501:8501"
-
-  env_file:
-    - .env
-
-  volumes:
-    - .:/app
-    

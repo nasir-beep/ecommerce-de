@@ -6,6 +6,9 @@ import plotly.express as px
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
+# ----------------------------------
+# Load environment variables
+# ----------------------------------
 load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -21,68 +24,138 @@ connection = (
 
 engine = create_engine(connection)
 
-# Dashboard title
+# ----------------------------------
+# Streamlit Page Config
+# ----------------------------------
 st.set_page_config(
     page_title="E-Commerce Analytics Dashboard",
     layout="wide"
 )
 
-st.title("🛒 E-Commerce Analytics Dashboard")
+st.title("📊 E-Commerce Analytics Dashboard")
 st.markdown("---")
 
-#Load data from the database
+# ----------------------------------
+# Load Data
+# ----------------------------------
 query = """
 SELECT
     f.order_id,
-    f.customer_id,
-    f.product_id,
-    f.sales,
     f.order_date,
-    c.region,
+    f.sales,
+
+    c.customer_name,
     c.segment,
+    c.region,
+
     p.category,
-    p.product_name
+    p.sub_category,
+    p.product_name,
+
+    d.year,
+    d.quarter,
+    d.month
+
 FROM fact_sales f
-JOIN dim_customer c
+
+LEFT JOIN dim_customer c
 ON f.customer_id = c.customer_id
-JOIN dim_product p
+
+LEFT JOIN dim_product p
 ON f.product_id = p.product_id
+
+LEFT JOIN dim_date d
+ON f.order_date = d.date_id
+
+ORDER BY f.order_date;
 """
 
 df = pd.read_sql(query, engine)
 
-st.write("Number of rows:", len(df))
-st.write(df.head())
-st.write(df.columns.tolist())
-
 df["order_date"] = pd.to_datetime(df["order_date"])
 
-#KPI cards
-col1, col2, col3, col4 = st.columns(4)
+# ----------------------------------
+# Sidebar Filters
+# ----------------------------------
+st.sidebar.header("Filters")
+
+regions = st.sidebar.multiselect(
+    "Region",
+    sorted(df["region"].dropna().unique())
+)
+
+categories = st.sidebar.multiselect(
+    "Category",
+    sorted(df["category"].dropna().unique())
+)
+
+segments = st.sidebar.multiselect(
+    "Customer Segment",
+    sorted(df["segment"].dropna().unique())
+)
+
+years = st.sidebar.multiselect(
+    "Year",
+    sorted(df["year"].dropna().unique())
+)
+
+filtered_df = df.copy()
+
+if regions:
+    filtered_df = filtered_df[
+        filtered_df["region"].isin(regions)
+    ]
+
+if categories:
+    filtered_df = filtered_df[
+        filtered_df["category"].isin(categories)
+    ]
+
+if segments:
+    filtered_df = filtered_df[
+        filtered_df["segment"].isin(segments)
+    ]
+
+if years:
+    filtered_df = filtered_df[
+        filtered_df["year"].isin(years)
+    ]
+
+# ----------------------------------
+# No data after filtering
+# ----------------------------------
+if filtered_df.empty:
+    st.warning("No data found for the selected filters.")
+    st.stop()
+
+# ----------------------------------
+# KPI Cards
+# ----------------------------------
+col1, col2, col3 = st.columns(3)
 
 col1.metric(
     "Total Sales",
-    f"${df['sales'].sum():,.2f}"
+    f"${filtered_df['sales'].sum():,.2f}"
 )
 
 col2.metric(
     "Orders",
-    len(df)
+    f"{filtered_df['order_id'].nunique():,}"
 )
 
 col3.metric(
     "Customers",
-    df["customer_id"].nunique()
+    f"{filtered_df['customer_name'].nunique():,}"
 )
 
-col4.metric(
-    "Average Order",
-    f"${df['sales'].mean():,.2f}"
-)
+st.markdown("---")
 
-#Sales charts - monthly
+# ----------------------------------
+# Monthly Sales
+# ----------------------------------
 monthly = (
-    df.groupby(df["order_date"].dt.to_period("M"))["sales"]
+    filtered_df
+    .groupby(filtered_df["order_date"].dt.to_period("M"))["sales"]
     .sum()
     .reset_index()
 )
@@ -93,58 +166,86 @@ fig_monthly = px.line(
     monthly,
     x="order_date",
     y="sales",
+    markers=True,
     title="Monthly Sales"
 )
 
-st.plotly_chart(fig_monthly, use_container_width=True, key="monthly_sales")
+st.plotly_chart(fig_monthly, use_container_width=True)
 
-#Sales by region
-region = (
-    df.groupby("region")["sales"]
+# ----------------------------------
+# Two Charts Side-by-Side
+# ----------------------------------
+left, right = st.columns(2)
+
+with left:
+
+    region_sales = (
+        filtered_df
+        .groupby("region")["sales"]
+        .sum()
+        .reset_index()
+    )
+
+    fig_region = px.bar(
+        region_sales,
+        x="region",
+        y="sales",
+        color="region",
+        title="Sales by Region"
+    )
+
+    st.plotly_chart(fig_region, use_container_width=True)
+
+with right:
+
+    category_sales = (
+        filtered_df
+        .groupby("category")["sales"]
+        .sum()
+        .reset_index()
+    )
+
+    fig_category = px.pie(
+        category_sales,
+        names="category",
+        values="sales",
+        title="Sales by Category"
+    )
+
+    st.plotly_chart(fig_category, use_container_width=True)
+
+# ----------------------------------
+# Top 10 Products
+# ----------------------------------
+top_products = (
+    filtered_df
+    .groupby("product_name")["sales"]
     .sum()
-    .reset_index()
-)
-
-fig_region = px.bar(
-    region,
-    x="region",
-    y="sales",
-    title="Sales by Region"
-)
-
-st.plotly_chart(fig_region, use_container_width=True, key="region_sales")
-
-#Sales by category
-category = (
-    df.groupby("category")["sales"]
-    .sum()
-    .reset_index()
-)
-
-fig_category = px.bar(
-    category,
-    x="category",
-    y="sales",
-    title="Sales by Category"
-)
-
-st.plotly_chart(fig_category, use_container_width=True, key="category_sales")
-
-#Top products
-products = (
-    df.groupby("product_name")["sales"]
-    .sum()
-    .sort_values(ascending=False)
-    .head(10)
+    .nlargest(10)
     .reset_index()
 )
 
 fig_products = px.bar(
-    products,
+    top_products,
     x="sales",
     y="product_name",
     orientation="h",
-    title="Top Products"
+    color="sales",
+    title="Top 10 Products"
 )
 
-st.plotly_chart(fig_products, use_container_width=True, key="top_products")
+fig_products.update_layout(
+    yaxis={"categoryorder": "total ascending"}
+)
+
+st.plotly_chart(fig_products, use_container_width=True)
+
+# ----------------------------------
+# Dataset
+# ----------------------------------
+st.subheader("Filtered Dataset")
+
+st.dataframe(
+    filtered_df,
+    use_container_width=True
+)
