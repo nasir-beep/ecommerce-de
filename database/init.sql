@@ -1,1 +1,1 @@
-\i /docker-entrypoint-initdb.d/schema.sql
+CREATE DATABASE ecommerce_db;

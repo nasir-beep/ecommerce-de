@@ -6,24 +6,24 @@ from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import execute_values
 
-# -------------------------------------------------------
+# ---------------------------------------------------
 # Load Environment Variables
-# -------------------------------------------------------
+# ---------------------------------------------------
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 DATA_PATH = Path("data/processed/clean_sales.csv")
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
+DB_PORT = os.getenv("DB_PORT", "5433")
 DB_NAME = os.getenv("DB_NAME", "ecommerce_db")
 DB_USER = os.getenv("DB_USER", "airflow")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "airflow")
 
 
-# -------------------------------------------------------
+# ---------------------------------------------------
 # Database Connection
-# -------------------------------------------------------
+# ---------------------------------------------------
 
 def get_connection():
     return psycopg2.connect(
@@ -35,16 +35,19 @@ def get_connection():
     )
 
 
-# -------------------------------------------------------
-# ETL Load
-# -------------------------------------------------------
+# ---------------------------------------------------
+# Load Data Warehouse
+# ---------------------------------------------------
 
 def load_data():
 
     print("=" * 60)
-    print("Loading Data Warehouse")
+    print("LOADING DATA WAREHOUSE")
     print("=" * 60)
 
+    # -----------------------------
+    # Read Cleaned Data
+    # -----------------------------
     print("\nReading cleaned dataset...")
 
     df = pd.read_csv(DATA_PATH)
@@ -55,20 +58,28 @@ def load_data():
     df["order_date"] = pd.to_datetime(df["order_date"]).dt.date
     df["ship_date"] = pd.to_datetime(df["ship_date"]).dt.date
 
+    print("\nDuplicate Checks")
+    print("-" * 40)
+    print(f"Duplicate Customer IDs : {df['customer_id'].duplicated().sum()}")
+    print(f"Duplicate Product IDs  : {df['product_id'].duplicated().sum()}")
+    print(f"Duplicate Order Dates  : {df['order_date'].duplicated().sum()}")
+
+    # -----------------------------
+    # Connect to PostgreSQL
+    # -----------------------------
     print("\nConnecting to PostgreSQL...")
 
     conn = get_connection()
     cur = conn.cursor()
 
-    print("Connected Successfully!\n")
+    print("Connected Successfully!")
 
     try:
 
-        # ------------------------------------------
-        # Clear Existing Data
-        # ------------------------------------------
-
-        print("Clearing warehouse tables...")
+        # -----------------------------
+        # Clear Warehouse
+        # -----------------------------
+        print("\nClearing Existing Tables...")
 
         cur.execute("""
             TRUNCATE TABLE
@@ -79,13 +90,13 @@ def load_data():
             RESTART IDENTITY CASCADE;
         """)
 
-        # ------------------------------------------
-        # Customer Dimension
-        # ------------------------------------------
+        # ==========================================================
+        # CUSTOMER DIMENSION
+        # ==========================================================
 
-        print("Loading Customer Dimension...")
+        print("\nLoading Customer Dimension...")
 
-        customers = (
+        customers_df = (
             df[
                 [
                     "customer_id",
@@ -98,9 +109,10 @@ def load_data():
                     "region",
                 ]
             ]
-            .drop_duplicates()
-            .values.tolist()
+            .drop_duplicates(subset=["customer_id"], keep="first")
         )
+
+        customers = customers_df.values.tolist()
 
         execute_values(
             cur,
@@ -122,13 +134,13 @@ def load_data():
 
         print(f"Loaded {len(customers)} Customers")
 
-        # ------------------------------------------
-        # Product Dimension
-        # ------------------------------------------
+        # ==========================================================
+        # PRODUCT DIMENSION
+        # ==========================================================
 
-        print("Loading Product Dimension...")
+        print("\nLoading Product Dimension...")
 
-        products = (
+        products_df = (
             df[
                 [
                     "product_id",
@@ -137,9 +149,10 @@ def load_data():
                     "product_name",
                 ]
             ]
-            .drop_duplicates()
-            .values.tolist()
+            .drop_duplicates(subset=["product_id"], keep="first")
         )
+
+        products = products_df.values.tolist()
 
         execute_values(
             cur,
@@ -157,13 +170,13 @@ def load_data():
 
         print(f"Loaded {len(products)} Products")
 
-        # ------------------------------------------
-        # Date Dimension
-        # ------------------------------------------
+        # ==========================================================
+        # DATE DIMENSION
+        # ==========================================================
 
-        print("Loading Date Dimension...")
+        print("\nLoading Date Dimension...")
 
-        dates = (
+        dates_df = (
             df[
                 [
                     "order_date",
@@ -173,7 +186,7 @@ def load_data():
                     "order_day",
                 ]
             ]
-            .drop_duplicates()
+            .drop_duplicates(subset=["order_date"], keep="first")
             .rename(
                 columns={
                     "order_date": "date_id",
@@ -183,8 +196,9 @@ def load_data():
                     "order_day": "day",
                 }
             )
-            .values.tolist()
         )
+
+        dates = dates_df.values.tolist()
 
         execute_values(
             cur,
@@ -203,11 +217,11 @@ def load_data():
 
         print(f"Loaded {len(dates)} Dates")
 
-        # ------------------------------------------
-        # Fact Table
-        # ------------------------------------------
+        # ==========================================================
+        # FACT TABLE
+        # ==========================================================
 
-        print("Loading Fact Table...")
+        print("\nLoading Fact Table...")
 
         facts = (
             df[
@@ -245,10 +259,9 @@ def load_data():
 
         print(f"Loaded {len(facts)} Sales Records")
 
-        # ------------------------------------------
-        # Commit Transaction
-        # ------------------------------------------
-
+        # -----------------------------
+        # Commit
+        # -----------------------------
         conn.commit()
 
         print("\n" + "=" * 60)
@@ -272,9 +285,9 @@ def load_data():
         print("\nDatabase Connection Closed")
 
 
-# -------------------------------------------------------
+# ---------------------------------------------------
 # Main
-# -------------------------------------------------------
+# ---------------------------------------------------
 
 if __name__ == "__main__":
     load_data()
